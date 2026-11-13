@@ -169,7 +169,7 @@ with tab_rev:
 
 with st.expander("ATENÇÃO!", expanded=False):
     st.markdown("""
-    **Dados Restritos** Não compartilhe dados internos fora da empresa. As informações apresentadas são `confidenciais` e de uso `exclusivo` para fins operacionais.
+    **Dados Restritos:** Não compartilhe dados internos fora da empresa. As informações apresentadas são `confidenciais` e de uso `exclusivo` para fins operacionais.
 
     **Atualizações:** Atualizações e a analise dos dados deste painel, é feita pela equipe de `Proteção de Ativos`.
     """)
