@@ -14,7 +14,8 @@ import streamlit.components.v1 as components
 
 import aquila_visual as visual
 from conciliacao import conciliar
-from fonte_bigquery import carregar_bases, limpar_cache, configuracao_disponivel
+from custo_nf import associar_custos, somar_custo_sem_checkin
+from fonte_bigquery import carregar_bases, carregar_custos, limpar_cache, configuracao_disponivel
 from classificacao import classificar_unidades, filtrar_hierarquia, ler_classificacao
 from matriz import moeda, montar_matriz, numero_br
 
@@ -40,6 +41,22 @@ def filtrar_lojas_do_link(dados: pd.DataFrame) -> pd.DataFrame:
     codigo = pd.to_numeric(dados["COD_LOJA"], errors="coerce")
     return dados.loc[codigo.between(1, 68).fillna(False)].copy()
 
+@st.cache_data(show_spinner=False, ttl=600, max_entries=2)
+def carregar_dados_conciliados() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Carrega e processa as três bases uma vez por janela de 10 minutos.
+
+    Evita repetir consultas ao BigQuery, conciliação e associação de custos
+    a cada interação dos filtros, abas ou tabelas do Streamlit.
+    """
+    auto, checkin = carregar_bases()
+    custos = carregar_custos()
+    dados, candidatos, indicadores = conciliar(auto, checkin)
+    dados = associar_custos(dados, custos)
+    cadastro = ler_classificacao(Path(__file__).with_name("classificacao_unidades.csv"))
+    dados = classificar_unidades(dados, cadastro)
+    return dados, candidatos, indicadores
+
+
 def gerar_csv(df: pd.DataFrame, colunas: list[str]) -> bytes:
     recorte = df.loc[:, colunas].copy()
     for coluna in ("DTAENTRADA", "DTAEMISSAO", "ENTRADA_CHECKIN"):
@@ -48,12 +65,12 @@ def gerar_csv(df: pd.DataFrame, colunas: list[str]) -> bytes:
     return recorte.to_csv(index=False, sep=";", decimal=",", encoding="utf-8-sig").encode("utf-8-sig")
 
 
-def painel(nome: str, dados: pd.DataFrame, *, com_checkin: bool, tema: dict[str, str], arquivo_csv: str, ordenar_por_registros: bool = False):
+def painel(nome: str, dados: pd.DataFrame, *, com_checkin: bool, tema: dict[str, str], arquivo_csv: str, ordenar_por_registros: bool = False, ordenar_por_custo_descendente: bool = False):
     visual.secao(nome, "Clique nos títulos para ordenar as lojas e na seta para abrir as notas. Nos detalhes, os títulos também ordenam as NFs.")
     if dados.empty:
         visual.vazio("Nenhuma nota encontrada", "Nenhum registro corresponde aos filtros selecionados.")
         return
-    components.html(montar_matriz(dados, com_checkin=com_checkin, paleta=tema, ordenar_por_registros=ordenar_por_registros), height=590, scrolling=False)
+    components.html(montar_matriz(dados, com_checkin=com_checkin, paleta=tema, ordenar_por_registros=ordenar_por_registros, ordenar_por_custo_descendente=ordenar_por_custo_descendente), height=590, scrolling=False)
     if com_checkin:
         cols = [
             "EMPRESA", "NUMERONF", "NROEMP_ORIGEM", "DTAEMISSAO", "DTAENTRADA",
@@ -63,7 +80,8 @@ def painel(nome: str, dados: pd.DataFrame, *, com_checkin: bool, tema: dict[str,
     else:
         cols = [
             "EMPRESA", "NUMERONF", "NROEMP_ORIGEM", "DTAEMISSAO", "DTAENTRADA",
-            "NRO_DIAS", "CODGERALOPER", "SITUACAO", "LINHA_AUTO",
+            "NRO_DIAS", "CODGERALOPER", "QUANTIDADE_CUSTO", "CUSTO_LIQUIDO",
+            "SERIE_CUSTO", "SITUACAO_CUSTO", "SITUACAO", "LINHA_AUTO",
         ]
     st.download_button(
         "Exportar registros em CSV", data=gerar_csv(dados, cols),
@@ -78,9 +96,10 @@ if not visao_compartilhada:
         st.divider()
         escuro = st.toggle("Modo escuro", value=False)
         st.markdown('<div class="aq-sidebar-label">DADOS DO BIGQUERY</div>', unsafe_allow_html=True)
-        st.caption("Fonte: BigQuery · Dataset controle_recebimento. Atualização automática a cada 10 minutos.")
+        st.caption("Atualização automática a cada 10 minutos.")
         if st.button("Atualizar dados agora", use_container_width=True):
             limpar_cache()
+            carregar_dados_conciliados.clear()
 else:
     escuro = False  # Layout claro no link compartilhado, sem controles laterais.
 
@@ -100,7 +119,7 @@ tema = visual.paleta(escuro)
 if not visao_compartilhada:
     visual.cabecalho(
         "Conciliação de notas fiscais",
-        "Notas da ENTRADA AUTO NF localizadas na base CHECKIN, com análise de pendências por unidade.",
+        "Acompanhamento das Notas com entradas automaticas.",
         etiqueta="CONTROLE OPERACIONAL / ENTRADA DE NF",
     )
 
@@ -109,10 +128,7 @@ try:
         if not configuracao_disponivel():
             st.error("Configure a seção [bigquery] em .streamlit/secrets.toml ou nos Secrets do Streamlit Cloud.")
             st.stop()
-        auto, checkin = carregar_bases()
-        dados, candidatos, indicadores = conciliar(auto, checkin)
-        cadastro = ler_classificacao(Path(__file__).with_name("classificacao_unidades.csv"))
-        dados = classificar_unidades(dados, cadastro)
+        dados, candidatos, indicadores = carregar_dados_conciliados()
 except Exception as e:
     st.error(f"Não foi possível obter ou conciliar as bases: {e}")
     st.info("Confira as permissões de leitura, o projeto/dataset, a região e o esquema das tabelas no BigQuery.")
@@ -164,72 +180,97 @@ valor_unico = localizados.loc[localizados["SITUACAO"].eq("Localizado")].drop_dup
     ["COD_LOJA", "NF_NORMALIZADA"]
 )["VALOR_CHECKIN"].sum(min_count=1)
 
-k1, k2, k3, k4 = st.columns(4)
-with k1:
-    visual.kpi("Registros Auto NF", numero_br(len(filtrados)), "Quantidade de linhas na base", "blue")
-with k2:
-    visual.kpi("Com check-in", numero_br(len(localizados)), "Inclui ocorrências múltiplas", "teal")
-with k3:
-    visual.kpi("Sem check-in", numero_br(len(sem_checkin)), "Sem correspondência na base recebida", "orange")
-with k4:
-    visual.kpi("Valor localizado", moeda(valor_unico), "Notas únicas sem ambiguidade", "teal")
+def exibir_kpis(titulo_valor: str, valor: float, descricao_valor: str) -> None:
+    """Renderiza os quatro indicadores usando o valor da aba atualmente aberta."""
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        visual.kpi("Entradas Automaticas", numero_br(len(filtrados)), "Quantidade de Notas", "blue")
+    with k2:
+        visual.kpi("Com check-in", numero_br(len(localizados)), "Notas com Check-in", "teal")
+    with k3:
+        visual.kpi("Sem check-in", numero_br(len(sem_checkin)), "Notas Sem Check-in", "orange")
+    with k4:
+        visual.kpi(titulo_valor, moeda(valor), descricao_valor, "teal")
+
+
+# Reserva a posição dos KPIs antes da legenda e das abas, preservando o layout original.
+area_kpis = st.container()
 
 st.caption(
     f"{numero_br(len(multiplos))} registro(s) com múltiplos check-ins | "
-    f"{filtrados['EMPRESA'].nunique()} unidade(s) no filtro | "
-    "a conciliação usa código da unidade + NF normalizada."
+    f"{filtrados['EMPRESA'].nunique()} unidade(s) no filtro"
 )
 
 if visao_compartilhada:
-    st.caption("NOTAS SEM CHECK-IN - SOMENTE LOJAS (SEM CDs)")
-    painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv", ordenar_por_registros=True)
-    st.caption("'Sem check-in' significa ausência de correspondência nas bases disponíveis, não prova de que o recebimento nunca ocorreu.")
+    # O link compartilhável representa exclusivamente a visão Sem check-in.
+    custo_pendente = somar_custo_sem_checkin(sem_checkin)
+    with area_kpis:
+        exibir_kpis(
+            "Custo líquido sem check-in", custo_pendente,
+            "Soma das notas únicas com custo localizado",
+        )
+    painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv", ordenar_por_custo_descendente=True)
+    
     if st.button("Voltar ao dashboard completo", key="voltar_dashboard_completo"):
         st.query_params.pop("visao", None)
         st.rerun()
 else:
-    tab_com, tab_sem, tab_rev = st.tabs(["Com check-in", "Sem check-in", "Revisar múltiplos check-ins"])
-    with tab_com:
-        painel("Notas com check-in", localizados, com_checkin=True, tema=tema, arquivo_csv="notas_com_checkin.csv")
-        if not multiplos.empty:
-            st.warning("Algumas notas possuem mais de um check-in para a mesma unidade e NF. O valor dessas notas não foi atribuído automaticamente.")
-    with tab_sem:
-        if st.button("Abrir para apresentação", key="compartilhar_sem_checkin"):
-            st.query_params["visao"] = "sem-checkin"
-            st.rerun()
-        painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
-        st.caption("'Sem check-in' significa ausência de correspondência nos arquivos carregados, não prova de que o recebimento nunca ocorreu.")
-    with tab_rev:
-        visual.secao("Notas com múltiplos registros", "Os candidatos reais do CHECKIN são apresentados sem escolher automaticamente um valor.")
-        if multiplos.empty:
-            visual.vazio("Nenhuma ambiguidade no filtro", "Não há notas com múltiplos check-ins para os filtros selecionados.")
-        else:
-            chaves = multiplos[["COD_LOJA", "NF_NORMALIZADA"]].drop_duplicates()
-            revisao = chaves.merge(candidatos, on=["COD_LOJA", "NF_NORMALIZADA"], how="left")
-            vis = revisao[[
-                "Loja", "Nota", "Fornecedor", "Entrada", "Valor", "Check-In",
-                "Status Check-In", "Status NF", "LINHA_CHECKIN",
-            ]].copy()
-            vis["Entrada"] = pd.to_datetime(vis["Entrada"], errors="coerce").dt.strftime("%d/%m/%Y")
-            st.dataframe(vis, width="stretch", hide_index=True, height=420)
-            st.download_button("Exportar candidatos para conferência (CSV)",
-                               data=gerar_csv(revisao, ["Loja", "Nota", "Fornecedor", "Entrada", "Valor", "Check-In", "Status Check-In", "Status NF", "LINHA_CHECKIN"]),
-                               file_name="checkins_multiplos.csv", mime="text/csv")
+    # O placeholder mantém os KPIs visualmente acima das abas, embora o valor
+    # do último indicador dependa da aba selecionada pelo usuário.
+    tab_com, tab_sem, tab_rev = st.tabs(
+        ["Com check-in", "Sem check-in", "Revisar múltiplos check-ins"],
+        key="aba_conciliacao",
+        on_change="rerun",
+    )
 
-    with st.expander("Como funciona a conciliação", expanded=False):
+    if tab_sem.open:
+        titulo_kpi_valor = "Custo líquido sem check-in"
+        valor_kpi_valor = somar_custo_sem_checkin(sem_checkin)
+        descricao_kpi_valor = "Soma das notas únicas com custo localizado"
+    else:
+        # Com check-in e Revisar múltiplos mantêm o indicador financeiro original.
+        titulo_kpi_valor = "Valor localizado"
+        valor_kpi_valor = valor_unico
+        descricao_kpi_valor = "Notas únicas sem ambiguidade"
+
+    with area_kpis:
+        exibir_kpis(titulo_kpi_valor, valor_kpi_valor, descricao_kpi_valor)
+
+    # Renderiza somente o conteúdo da aba ativa. Além de atualizar o KPI ao
+    # trocar de aba, evita montar matrizes ocultas em cada rerun do Streamlit.
+    if tab_com.open:
+        with tab_com:
+            painel("Notas com check-in", localizados, com_checkin=True, tema=tema, arquivo_csv="notas_com_checkin.csv")
+
+    if tab_sem.open:
+        with tab_sem:
+            if st.button("Abrir para apresentação", key="compartilhar_sem_checkin"):
+                st.query_params["visao"] = "sem-checkin"
+                st.rerun()
+            painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
+            st.caption("'Sem check-in' significa ausência de correspondência nos arquivos carregados, não prova de que o recebimento nunca ocorreu.")
+
+    if tab_rev.open:
+        with tab_rev:
+            visual.secao("Notas com múltiplos registros",)
+            if multiplos.empty:
+                visual.vazio("Nenhuma ambiguidade no filtro", "Não há notas com múltiplos check-ins para os filtros selecionados.")
+            else:
+                chaves = multiplos[["COD_LOJA", "NF_NORMALIZADA"]].drop_duplicates()
+                revisao = chaves.merge(candidatos, on=["COD_LOJA", "NF_NORMALIZADA"], how="left")
+                vis = revisao[[
+                    "Loja", "Nota", "Fornecedor", "Entrada", "Valor", "Check-In",
+                    "Status Check-In", "Status NF", "LINHA_CHECKIN",
+                ]].copy()
+                vis["Entrada"] = pd.to_datetime(vis["Entrada"], errors="coerce").dt.strftime("%d/%m/%Y")
+                st.dataframe(vis, width="stretch", hide_index=True, height=420)
+                st.download_button("Exportar candidatos para conferência (CSV)",
+                                   data=gerar_csv(revisao, ["Loja", "Nota", "Fornecedor", "Entrada", "Valor", "Check-In", "Status Check-In", "Status NF", "LINHA_CHECKIN"]),
+                                   file_name="checkins_multiplos.csv", mime="text/csv")
+
+    with st.expander("ATENÇÃO !", expanded=False):
         st.markdown("""
-        **Chave de busca:** código da unidade + número da nota. Por exemplo,
-        `001-CARPINA` corresponde à unidade `NOVO - 01 - Carpina Centro`.
+        **Dados Privados:** Não compartilhe este link com pessoas externas à empresa. Ele contém informações financeiras e operacionais sensíveis.
 
-        **Tratamento da série:** `75137-1` → `75137` e `1776754-001` → `1776754`.
-        O sufixo numérico é retirado somente da coluna **Nota** do CHECKIN.
-
-        **Valor e check-in:** quando existe uma única correspondência, apresenta Valor,
-        número e status do check-in. Se houver dois ou mais registros do CHECKIN para a
-        mesma loja + nota, a nota permanece localizada, mas seu valor fica pendente
-        de análise na guia **Revisar múltiplos check-ins**.
-
-        **Preservação das linhas:** a saída mantém todas as linhas da ENTRADA AUTO NF,
-        incluindo registros repetidos. O indicador financeiro não soma a mesma
-        combinação de loja + NF mais de uma vez.
+        **Atualizações:** Todas as atualizações e Analises desses dados, são feitas pela equipe de `Proteção de Ativos`.
         """)

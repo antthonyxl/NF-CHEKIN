@@ -21,6 +21,14 @@ def numero_br(n: object, casas: int = 0) -> str:
         return "—"
 
 
+def quantidade_br(n: object) -> str:
+    """Formatar quantidade com parte decimal quando necessário, sem arredondar para inteiro."""
+    if n is None or pd.isna(n):
+        return "—"
+    # Os dados de quantidade do Excel podem ser fracionários.
+    return numero_br(n, 6).rstrip("0").rstrip(",") if "," in numero_br(n, 6) else numero_br(n)
+
+
 def moeda(n: object) -> str:
     return "—" if n is None or pd.isna(n) else f"R$ {numero_br(n, 2)}"
 
@@ -38,7 +46,7 @@ def contar_multiplos(grupo: pd.DataFrame) -> int:
     return grupo.loc[grupo["SITUACAO"].eq("Múltiplos check-ins"), "NF_NORMALIZADA"].nunique()
 
 
-def montar_matriz(df: pd.DataFrame, *, com_checkin: bool, paleta: dict[str, str], ordenar_por_registros: bool = False) -> str:
+def montar_matriz(df: pd.DataFrame, *, com_checkin: bool, paleta: dict[str, str], ordenar_por_registros: bool = False, ordenar_por_custo_descendente: bool = False) -> str:
     """HTML para components.html; colunas clicáveis, detalhes expansíveis e paginação de 75."""
     if com_checkin:
         colunas = [
@@ -50,10 +58,11 @@ def montar_matriz(df: pd.DataFrame, *, com_checkin: bool, paleta: dict[str, str]
     else:
         colunas = [
             "NF Auto", "Origem", "Emissão Auto", "Entrada Auto",
-            "Dias", "Operação", "Situação",
+            "Dias", "Operação", "Série custo", "Quantidade",
+            "Custo líquido", "Status custo", "Situação",
         ]
-        tipos_detalhe = ["identificador", "identificador", "data", "data", "numero", "identificador", "texto"]
-        headings = ["Loja / unidade", "Registros", "NFs únicas"]
+        tipos_detalhe = ["identificador", "identificador", "data", "data", "numero", "identificador", "identificador", "numero", "numero", "texto", "texto"]
+        headings = ["Loja / unidade", "Registros", "NFs únicas", "Quantidade", "Custo líquido"]
 
     grupos = []
     for loja, grupo in df.groupby("EMPRESA", sort=True, dropna=False):
@@ -80,11 +89,27 @@ def montar_matriz(df: pd.DataFrame, *, com_checkin: bool, paleta: dict[str, str]
                 [
                     celula(r.NUMERONF), celula(r.NROEMP_ORIGEM), celula(r.DTAEMISSAO),
                     celula(r.DTAENTRADA), celula(r.NRO_DIAS), celula(r.CODGERALOPER),
-                    celula(r.SITUACAO),
+                    celula(getattr(r, "SERIE_CUSTO", None)),
+                    quantidade_br(getattr(r, "QUANTIDADE_CUSTO", None)),
+                    moeda(getattr(r, "CUSTO_LIQUIDO", None)),
+                    celula(getattr(r, "SITUACAO_CUSTO", None)), celula(r.SITUACAO),
                 ] for r in grupo.itertuples(index=False)
             ]
-            extras = []
-            ordenacao = [celula(loja), total_registros, total_nfs]
+            if "SITUACAO_CUSTO" in grupo.columns:
+                com_custo_valido = grupo.loc[grupo["SITUACAO_CUSTO"].eq("Localizado")].drop_duplicates(
+                    ["COD_LOJA", "NF_NORMALIZADA"]
+                )
+                soma_quantidade = com_custo_valido["QUANTIDADE_CUSTO"].sum(min_count=1)
+                soma_custo = com_custo_valido["CUSTO_LIQUIDO"].sum(min_count=1)
+            else:
+                soma_quantidade = float("nan")
+                soma_custo = float("nan")
+            extras = [quantidade_br(soma_quantidade), moeda(soma_custo)]
+            ordenacao = [
+                celula(loja), total_registros, total_nfs,
+                None if pd.isna(soma_quantidade) else float(soma_quantidade),
+                None if pd.isna(soma_custo) else float(soma_custo),
+            ]
         grupos.append({
             "loja": celula(loja),
             "registros": numero_br(total_registros),
@@ -94,9 +119,15 @@ def montar_matriz(df: pd.DataFrame, *, com_checkin: bool, paleta: dict[str, str]
             "rows": linhas,
         })
 
-    # Apenas na visão compartilhada: iniciar o ranking por maior quantidade de
-    # registros sem check-in. As demais matrizes continuam na ordem original.
-    if ordenar_por_registros:
+    # Ordenações iniciais opcionais da visão de apresentação.
+    # Custos não localizados ficam no final; valores válidos em ordem decrescente.
+    if ordenar_por_custo_descendente and not com_checkin:
+        grupos.sort(key=lambda g: (
+            g["sortKeys"][4] is None,
+            0.0 if g["sortKeys"][4] is None else -float(g["sortKeys"][4]),
+            str(g["sortKeys"][0]),
+        ))
+    elif ordenar_por_registros:
         grupos.sort(key=lambda g: (-g["sortKeys"][1], str(g["sortKeys"][0])))
 
     # Escapa o JSON para impedir que texto da planilha encerre o <script> de dados.
@@ -104,12 +135,13 @@ def montar_matriz(df: pd.DataFrame, *, com_checkin: bool, paleta: dict[str, str]
         "groups": grupos,
         "columns": colunas,
         "detailTypes": tipos_detalhe,
+        "highlightLast": com_checkin,
     }, ensure_ascii=False, default=str, allow_nan=False)
     payload = payload.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
     grid_css = (
         "minmax(210px,1.5fr) minmax(100px,.48fr) minmax(95px,.48fr) minmax(150px,.9fr) minmax(105px,.5fr)"
         if com_checkin else
-        "minmax(210px,1.5fr) minmax(100px,.5fr) minmax(95px,.5fr)"
+        "minmax(210px,1.5fr) minmax(95px,.46fr) minmax(90px,.46fr) minmax(120px,.64fr) minmax(170px,.8fr)"
     )
     css_vars = ";".join([
         f"--bg:{paleta['bg']}", f"--surface:{paleta['surface']}",
@@ -151,7 +183,7 @@ details[open] .arrow {transform:rotate(90deg);}
 .ambiguous {color:var(--orange);font-weight:780;}
 .content {background:var(--surface);padding:14px 16px 20px 20px;border-top:1px solid var(--line);}
 .table-scroll {max-height:380px;overflow:auto;border:1px solid var(--line);border-radius:9px;}
-table {width:100%;border-collapse:collapse;min-width:950px;font-size:12px;}
+table {width:100%;border-collapse:collapse;min-width:1130px;font-size:12px;}
 th {position:sticky;top:0;background:var(--head);color:var(--head-text);text-align:left;z-index:2;padding:0 12px;white-space:nowrap;}
 .detail-sort {width:auto;max-width:100%;min-height:40px;padding:8px 0;background:transparent;color:var(--head-text);font-size:12px;}
 td {padding:10px 12px;border-bottom:1px solid var(--line);color:var(--text);}
@@ -230,7 +262,7 @@ payload.groups.forEach((group,i)=>{
  const s=document.createElement('summary');s.className='grid summary';
  s.innerHTML=`<div class="label"><span class="arrow">›</span><span class="name" title="${esc(group.loja)}">${esc(group.loja)}</span></div>`+
  `<span>${esc(group.registros)}</span><span>${esc(group.notas)}</span>`+
- group.extras.map((v,k)=>`<span class="${k===group.extras.length-1?'ambiguous':''}">${esc(v)}</span>`).join('');
+ group.extras.map((v,k)=>`<span class="${payload.highlightLast&&k===group.extras.length-1?'ambiguous':''}">${esc(v)}</span>`).join('');
  d.appendChild(s);
  const content=document.createElement('div');content.className='content';d.appendChild(content);
  d.addEventListener('toggle',()=>{if(d.open)renderPage(i,0);});
@@ -270,10 +302,12 @@ function renderPage(index,page){
  }));
 }
 </script></body></html>'''
-    ordenacao_inicial = (
-        {"col": 1, "direction": -1, "active": True}
-        if ordenar_por_registros else {"col": 0, "direction": 1, "active": False}
-    )
+    if ordenar_por_custo_descendente and not com_checkin:
+        ordenacao_inicial = {"col": 4, "direction": -1, "active": True}
+    elif ordenar_por_registros:
+        ordenacao_inicial = {"col": 1, "direction": -1, "active": True}
+    else:
+        ordenacao_inicial = {"col": 0, "direction": 1, "active": False}
     return html.replace("__THEME__", css_vars).replace("__DATA__", payload).replace(
         "__HEADINGS__", json.dumps(headings, ensure_ascii=False)
     ).replace("__INITIAL_SORT__", json.dumps(ordenacao_inicial))

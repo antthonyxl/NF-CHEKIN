@@ -12,7 +12,7 @@ from google.oauth2 import service_account
 
 from conciliacao import COLUNAS_AUTO, COLUNAS_CHECKIN, validar_colunas
 
-from consultas_bigquery import _AUTO_SQL, _CHECKIN_SQL, consulta_tabela
+from consultas_bigquery import _AUTO_SQL, _CHECKIN_SQL, _CUSTO_SQL, consulta_custos_relevantes, consulta_tabela
 
 
 def configuracao_disponivel() -> bool:
@@ -67,3 +67,16 @@ def carregar_bases() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def limpar_cache():
     _consultar.clear()
+
+
+def carregar_custos() -> pd.DataFrame:
+    """Terceira tabela do BigQuery: custo e quantidade por loja, NF e série."""
+    cfg = st.secrets["bigquery"]
+    projeto = str(cfg["project_id"])
+    dataset = str(cfg.get("dataset", "controle_recebimento"))
+    local = str(cfg.get("location", "southamerica-east1"))
+    sql = consulta_custos_relevantes(projeto, dataset)
+    custo = _consultar(sql, local, _cliente_bigquery())
+    if custo.empty:
+        custo = pd.DataFrame(columns=list(_CUSTO_SQL.values()))
+    return custo
