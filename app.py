@@ -6,7 +6,10 @@ Execução: streamlit run app.py
 from __future__ import annotations
 
 import re
+from datetime import datetime, time, timedelta
 from pathlib import Path
+from threading import Lock
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -29,6 +32,65 @@ st.set_page_config(
 )
 
 
+# Atualizações programadas no horário de Brasília.
+# A sessão ativa agenda somente o próximo horário, sem polling a cada minuto.
+FUSO_HORARIO = ZoneInfo("America/Sao_Paulo")
+HORARIOS_ATUALIZACAO = ((8, 0), (12, 0), (17, 0))
+
+
+def _horario_no_dia(data, horario: tuple[int, int]) -> datetime:
+    return datetime.combine(data, time(*horario), tzinfo=FUSO_HORARIO)
+
+
+def _ultima_janela_atualizacao(agora: datetime) -> datetime:
+    for horario in reversed(HORARIOS_ATUALIZACAO):
+        alvo = _horario_no_dia(agora.date(), horario)
+        if agora >= alvo:
+            return alvo
+    return _horario_no_dia(agora.date() - timedelta(days=1), HORARIOS_ATUALIZACAO[-1])
+
+
+def _proxima_atualizacao(agora: datetime) -> datetime:
+    for horario in HORARIOS_ATUALIZACAO:
+        alvo = _horario_no_dia(agora.date(), horario)
+        if alvo > agora:
+            return alvo
+    return _horario_no_dia(agora.date() + timedelta(days=1), HORARIOS_ATUALIZACAO[0])
+
+
+_agora = datetime.now(FUSO_HORARIO)
+_janela_atualizacao = _ultima_janela_atualizacao(_agora).strftime("%Y-%m-%d %H:%M")
+_proxima_atualizacao_em = _proxima_atualizacao(_agora)
+_segundos_ate_atualizacao = max(
+    1.0, (_proxima_atualizacao_em - _agora).total_seconds() + 2.0
+)
+
+
+@st.fragment(run_every=_segundos_ate_atualizacao)
+def _gatilho_atualizacao_programada() -> None:
+    # O fragmento fica quieto até o próximo horário; então solicita um único
+    # rerun completo, que carrega a nova janela de dados e agenda a seguinte.
+    if datetime.now(FUSO_HORARIO) >= _proxima_atualizacao_em:
+        st.rerun()
+
+
+_gatilho_atualizacao_programada()
+
+
+@st.cache_resource(show_spinner=False)
+def _estado_atualizacao_programada() -> dict:
+    # Compartilhado entre sessões: evita que cada usuário invalide o cache
+    # separadamente no mesmo horário de atualização.
+    return {"lock": Lock(), "janela": None}
+
+
+def _invalidar_cache_nova_janela(janela: str) -> None:
+    estado = _estado_atualizacao_programada()
+    with estado["lock"]:
+        if estado["janela"] != janela:
+            limpar_cache()
+            estado["janela"] = janela
+
 
 def filtrar_lojas_do_link(dados: pd.DataFrame) -> pd.DataFrame:
     """No link compartilhável, manter somente as lojas 001–068 da base atual.
@@ -41,12 +103,12 @@ def filtrar_lojas_do_link(dados: pd.DataFrame) -> pd.DataFrame:
     codigo = pd.to_numeric(dados["COD_LOJA"], errors="coerce")
     return dados.loc[codigo.between(1, 68).fillna(False)].copy()
 
-@st.cache_data(show_spinner=False, ttl=600, max_entries=2)
-def carregar_dados_conciliados() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-    """Carrega e processa as três bases uma vez por janela de 10 minutos.
+@st.cache_data(show_spinner=False, ttl=None, max_entries=2)
+def carregar_dados_conciliados(janela_atualizacao: str) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Carrega as três bases uma vez por janela programada (08h, 12h ou 17h).
 
-    Evita repetir consultas ao BigQuery, conciliação e associação de custos
-    a cada interação dos filtros, abas ou tabelas do Streamlit.
+    A chave da janela mantém os dados em cache entre interações e só permite
+    nova leitura do BigQuery nos três horários definidos ou por atualização manual.
     """
     auto, checkin = carregar_bases()
     custos = carregar_custos()
@@ -96,12 +158,16 @@ if not visao_compartilhada:
         st.divider()
         escuro = st.toggle("Modo escuro", value=False)
         st.markdown('<div class="aq-sidebar-label">DADOS DO BIGQUERY</div>', unsafe_allow_html=True)
-        st.caption("Atualização automática a cada 10 minutos.")
+        st.caption("Atualização automática às 08h, 12h e 17h (horário de Brasília).")
         if st.button("Atualizar dados agora", use_container_width=True):
             limpar_cache()
             carregar_dados_conciliados.clear()
 else:
     escuro = False  # Layout claro no link compartilhado, sem controles laterais.
+
+# Invalida a leitura interna do BigQuery uma única vez quando a janela muda.
+# O cache do processamento completo usa a própria janela como chave.
+_invalidar_cache_nova_janela(_janela_atualizacao)
 
 visual.aplicar_tema(escuro)
 # Somente no link compartilhavel: respiro entre o topo da pagina e os KPIs.
@@ -128,7 +194,7 @@ try:
         if not configuracao_disponivel():
             st.error("Configure a seção [bigquery] em .streamlit/secrets.toml ou nos Secrets do Streamlit Cloud.")
             st.stop()
-        dados, candidatos, indicadores = carregar_dados_conciliados()
+        dados, candidatos, indicadores = carregar_dados_conciliados(_janela_atualizacao)
 except Exception as e:
     st.error(f"Não foi possível obter ou conciliar as bases: {e}")
     st.info("Confira as permissões de leitura, o projeto/dataset, a região e o esquema das tabelas no BigQuery.")
@@ -248,7 +314,6 @@ else:
                 st.query_params["visao"] = "sem-checkin"
                 st.rerun()
             painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
-            st.caption("'Sem check-in' significa ausência de correspondência nos arquivos carregados, não prova de que o recebimento nunca ocorreu.")
 
     if tab_rev.open:
         with tab_rev:
@@ -272,5 +337,7 @@ else:
         st.markdown("""
         **Dados Privados:** Não compartilhe este link com pessoas externas à empresa. Ele contém informações financeiras e operacionais sensíveis.
 
-        **Atualizações:** Todas as atualizações e Analises desses dados, são feitas pela equipe de `Proteção de Ativos`.
+        **Atualizações automáticas:** O dashboard consulta as bases às 08h, 12h e 17h (horário de Brasília). Também é possível usar o botão "Atualizar dados agora" para uma atualização extraordinária.
+
+        **Responsabilidade:** As atualizações e análises operacionais desses dados são feitas pela equipe de `Proteção de Ativos`.
         """)
