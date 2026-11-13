@@ -147,8 +147,6 @@ st.caption(
 tab_com, tab_sem, tab_rev = st.tabs(["Com check-in", "Sem check-in", "Revisar múltiplos check-ins"])
 with tab_com:
     painel("Notas com check-in", localizados, com_checkin=True, tema=tema, arquivo_csv="notas_com_checkin.csv")
-    if not multiplos.empty:
-        st.warning("Algumas notas possuem mais de um check-in para a mesma unidade e NF. O valor dessas notas não foi atribuído automaticamente.")
 with tab_sem:
     painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
     st.caption("'Sem check-in' significa ausência de correspondência nos arquivos carregados, não prova de que o recebimento nunca ocorreu.")
