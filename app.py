@@ -162,7 +162,7 @@ with tab_rev:
         ]].copy()
         vis["Entrada"] = pd.to_datetime(vis["Entrada"], errors="coerce").dt.strftime("%d/%m/%Y")
         st.dataframe(vis, width="stretch", hide_index=True, height=420)
-        st.download_button("Exportar candidatos para conferência (CSV)",
+        st.download_button("Exportar (CSV)",
                            data=gerar_csv(revisao, ["Loja", "Nota", "Fornecedor", "Entrada", "Valor", "Check-In", "Status Check-In", "Status NF", "LINHA_CHECKIN"]),
                            file_name="checkins_multiplos.csv", mime="text/csv")
 
