@@ -2,7 +2,15 @@
 __pycache__/
 .pytest_cache/
 *.pyc
+
 .streamlit/secrets.toml
+.env
+.env.*
+
 data/*.xlsx
 data/*.xls
-*.csv
+data/*.csv
+carga_*.csv
+
+*service-account*.json
+*credenciais*.json

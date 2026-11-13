@@ -50,7 +50,7 @@ def montar_matriz(df: pd.DataFrame, *, com_checkin: bool, paleta: dict[str, str]
     else:
         colunas = [
             "NF Auto", "Origem", "Emissão Auto", "Entrada Auto",
-            "Dias", "CGO", "Situação",
+            "Dias", "Operação", "Situação",
         ]
         tipos_detalhe = ["identificador", "identificador", "data", "data", "numero", "identificador", "texto"]
         headings = ["Loja / unidade", "Registros", "NFs únicas"]

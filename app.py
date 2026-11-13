@@ -13,30 +13,16 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import aquila_visual as visual
-from conciliacao import conciliar, ler_auto, ler_checkin
+from conciliacao import conciliar
+from fonte_bigquery import carregar_bases, limpar_cache, configuracao_disponivel
 from classificacao import classificar_unidades, filtrar_hierarquia, ler_classificacao
 from matriz import moeda, montar_matriz, numero_br
 
 st.set_page_config(
-    page_title="Conciliação NF | Check-in", page_icon="📊", layout="wide",
-    initial_sidebar_state="expanded",
+    page_title="AUTO NF",
+    page_icon="imagem/image.png",
+    layout="wide",
 )
-
-
-@st.cache_data(show_spinner=False, max_entries=2)
-def processar(auto_bytes: bytes, checkin_bytes: bytes):
-    return conciliar(ler_auto(auto_bytes), ler_checkin(checkin_bytes))
-
-
-def fonte_arquivo(nome: str, chave: str):
-    up = st.sidebar.file_uploader(nome, type=["xlsx"], key=chave)
-    if up is not None:
-        return up.getvalue(), up.name
-    # Para trabalho local: basta colocar as duas bases no diretório data/.
-    for p in (Path("data") / nome, Path(nome)):
-        if p.is_file():
-            return p.read_bytes(), f"local: {p.name}"
-    return None, None
 
 
 def gerar_csv(df: pd.DataFrame, colunas: list[str]) -> bytes:
@@ -75,39 +61,31 @@ with st.sidebar:
                 '<small>CONCILIAÇÃO OPERACIONAL</small></div>', unsafe_allow_html=True)
     st.divider()
     escuro = st.toggle("Modo escuro", value=False)
-    st.markdown('<div class="aq-sidebar-label">ARQUIVOS DE ORIGEM</div>', unsafe_allow_html=True)
-    st.caption("Carregue os arquivos ou deixe-os na pasta data/ do projeto.")
-    auto_bytes, auto_nome = fonte_arquivo("ENTRADA AUTO NF LOJAS.xlsx", "upload_auto")
-    checkin_bytes, check_nome = fonte_arquivo("CHECKIN.xlsx", "upload_checkin")
-    if auto_nome:
-        st.caption(f"Auto NF: {auto_nome}")
-    if check_nome:
-        st.caption(f"Check-in: {check_nome}")
+    st.markdown('<div class="aq-sidebar-label">DADOS DO BIGQUERY</div>', unsafe_allow_html=True)
+    st.caption("Atualização automática a cada 10 minutos.")
+    if st.button("Atualizar dados agora", use_container_width=True):
+        limpar_cache()
 
 visual.aplicar_tema(escuro)
 tema = visual.paleta(escuro)
 visual.cabecalho(
     "Conciliação de notas fiscais",
-    "Notas da ENTRADA AUTO NF localizadas na base CHECKIN, com análise de pendências por unidade.",
+    "Esses dados são de uso interno e não devem ser compartilhados fora da empresa.",
     etiqueta="CONTROLE OPERACIONAL / ENTRADA DE NF",
 )
 
-if auto_bytes is None or checkin_bytes is None:
-    visual.vazio(
-        "Carregue as duas bases para começar",
-        "Na barra lateral, envie os arquivos ENTRADA AUTO NF LOJAS.xlsx e CHECKIN.xlsx. "
-        "Também é possível colocá-los na pasta data/ deste projeto para carregamento automático.",
-    )
-    st.stop()
-
 try:
-    with st.spinner("Lendo e conciliando as duas bases..."):
-        dados, candidatos, indicadores = processar(auto_bytes, checkin_bytes)
+    with st.spinner("Consultando e conciliando as bases..."):
+        if not configuracao_disponivel():
+            st.error("Configure a seção [bigquery] em .streamlit/secrets.toml ou nos Secrets do Streamlit Cloud.")
+            st.stop()
+        auto, checkin = carregar_bases()
+        dados, candidatos, indicadores = conciliar(auto, checkin)
         cadastro = ler_classificacao(Path(__file__).with_name("classificacao_unidades.csv"))
         dados = classificar_unidades(dados, cadastro)
 except Exception as e:
-    st.error(f"Não foi possível processar os arquivos: {e}")
-    st.info("Confira os nomes das colunas e utilize os layouts dos arquivos originais.")
+    st.error(f"Não foi possível obter ou conciliar as bases: {e}")
+    st.info("Confira as permissões de leitura, o projeto/dataset, a região e o esquema das tabelas no BigQuery.")
     st.stop()
 
 with st.container(border=True):
@@ -163,8 +141,7 @@ with k4:
 
 st.caption(
     f"{numero_br(len(multiplos))} registro(s) com múltiplos check-ins | "
-    f"{filtrados['EMPRESA'].nunique()} unidade(s) no filtro | "
-    "a conciliação usa código da unidade + NF normalizada."
+    f"{filtrados['EMPRESA'].nunique()} unidade(s) no filtro"
 )
 
 tab_com, tab_sem, tab_rev = st.tabs(["Com check-in", "Sem check-in", "Revisar múltiplos check-ins"])
@@ -192,20 +169,9 @@ with tab_rev:
                            data=gerar_csv(revisao, ["Loja", "Nota", "Fornecedor", "Entrada", "Valor", "Check-In", "Status Check-In", "Status NF", "LINHA_CHECKIN"]),
                            file_name="checkins_multiplos.csv", mime="text/csv")
 
-with st.expander("Como funciona a conciliação", expanded=False):
+with st.expander("ATENÇÃO!", expanded=False):
     st.markdown("""
-    **Chave de busca:** código da unidade + número da nota. Por exemplo,
-    `001-CARPINA` corresponde à unidade `NOVO - 01 - Carpina Centro`.
+    **Dados Restritos** Não compartilhe dados internos fora da empresa. As informações apresentadas são `confidenciais` e de uso `exclusivo` para fins operacionais.
 
-    **Tratamento da série:** `75137-1` → `75137` e `1776754-001` → `1776754`.
-    O sufixo numérico é retirado somente da coluna **Nota** do CHECKIN.
-
-    **Valor e check-in:** quando existe uma única correspondência, apresenta Valor,
-    número e status do check-in. Se houver dois ou mais registros do CHECKIN para a
-    mesma loja + nota, a nota permanece localizada, mas seu valor fica pendente
-    de análise na guia **Revisar múltiplos check-ins**.
-
-    **Preservação das linhas:** a saída mantém todas as linhas da ENTRADA AUTO NF,
-    incluindo registros repetidos. O indicador financeiro não soma a mesma
-    combinação de loja + NF mais de uma vez.
+    **Atualizações:** Atualizações e a analise dos dados deste painel, é feita pela equipe de `Proteção de Ativos`.
     """)

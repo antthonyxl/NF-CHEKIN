@@ -1,5 +1,7 @@
 # Conciliação NF × CHECKIN — Streamlit
 
+**NOVA FONTE BIGQUERY:** leia `LEIA-ME_BIGQUERY.md` para configurar a conexão de leitura, conferir o esquema das tabelas já carregadas e orientar as próximas cargas históricas. O dashboard agora consulta exclusivamente o BigQuery.
+
 Painel operacional com a identidade visual do módulo `aquila_visual.py` fornecido.
 
 ## Rodar localmente (PowerShell / Windows)
@@ -15,8 +17,7 @@ streamlit run app.py
 Caso a política de execução do PowerShell impeça a ativação, utilize diretamente
 ` .\.venv\Scripts\python.exe -m streamlit run app.py ` (sem necessidade de ativar).
 
-Na barra lateral, faça upload de **ENTRADA AUTO NF LOJAS.xlsx** e **CHECKIN.xlsx**.
-Alternativamente, coloque ambos na pasta `data/` (não versionada) e reinicie o app.
+A fonte é somente o BigQuery. Configure `.streamlit/secrets.toml` com o projeto, dataset e credenciais conforme `LEIA-ME_BIGQUERY.md`.
 
 ## O que o painel faz
 
@@ -47,13 +48,13 @@ Alternativamente, coloque ambos na pasta `data/` (não versionada) e reinicie o 
 
 ## Estrutura
 
-- `app.py`: interface, uploads, filtros, KPIs e downloads.
+- `app.py`: interface, leitura via BigQuery, filtros, KPIs e downloads.
 - `classificacao.py`: classificação por nome da unidade e filtro Regional/Distrital.
 - `classificacao_unidades.csv`: cadastro fornecido para Regionais e Distritais.
 - `conciliacao.py`: regra de normalização, análise de duplicidades e junção segura.
 - `matriz.py`: visualização hierárquica expansível.
 - `aquila_visual.py`: estilos da referência do usuário (claro/escuro).
-- `leitura_xlsx.py`: leitura incremental do CHECKIN de grande porte (somente colunas necessárias).
+- `leitura_xlsx.py`: utilitário mantido para testes e conferências técnicas; não é utilizado na interface.
 - `VALIDACAO_DAS_BASES.md`: resultado da análise real dos arquivos enviados.
 - `tests/test_conciliacao.py`: testes de conciliação.
 - `tests/test_matriz.py`: testes de geração das matrizes ordenáveis.
