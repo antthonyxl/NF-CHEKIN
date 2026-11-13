@@ -1,0 +1,20 @@
+NF × CHECK-IN — ORDENACAO INICIAL (LINK COMPARTILHAVEL)
+
+Substitua SOMENTE os arquivos app.py e matriz.py da raiz do projeto pelos arquivos deste pacote.
+
+Resultado:
+- O link ?visao=sem-checkin abre a matriz de lojas com maior quantidade de registros sem check-in primeiro.
+- A coluna Registros aparece marcada como ordem decrescente (seta para baixo).
+- Um clique no titulo Registros alterna para crescente; outros titulos continuam ordenaveis.
+- Os CDs seguem excluidos no link; espaco acima dos KPIs permanece.
+- Dashboard completo e conciliaçao BigQuery continuam como antes.
+
+Publicar no repositorio GitHub:
+git add app.py matriz.py
+git commit -m "Ordena link compartilhavel por registros decrescentes"
+git push origin main
+
+Link: https://SEU-APP.streamlit.app/?visao=sem-checkin
+
+Validaçao: 12 testes preexistentes passaram, mais verificacao do ranking inicial e
+preservacao da matriz no dashboard completo.

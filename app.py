@@ -48,12 +48,12 @@ def gerar_csv(df: pd.DataFrame, colunas: list[str]) -> bytes:
     return recorte.to_csv(index=False, sep=";", decimal=",", encoding="utf-8-sig").encode("utf-8-sig")
 
 
-def painel(nome: str, dados: pd.DataFrame, *, com_checkin: bool, tema: dict[str, str], arquivo_csv: str):
+def painel(nome: str, dados: pd.DataFrame, *, com_checkin: bool, tema: dict[str, str], arquivo_csv: str, ordenar_por_registros: bool = False):
     visual.secao(nome, "Clique nos títulos para ordenar as lojas e na seta para abrir as notas. Nos detalhes, os títulos também ordenam as NFs.")
     if dados.empty:
         visual.vazio("Nenhuma nota encontrada", "Nenhum registro corresponde aos filtros selecionados.")
         return
-    components.html(montar_matriz(dados, com_checkin=com_checkin, paleta=tema), height=590, scrolling=False)
+    components.html(montar_matriz(dados, com_checkin=com_checkin, paleta=tema, ordenar_por_registros=ordenar_por_registros), height=590, scrolling=False)
     if com_checkin:
         cols = [
             "EMPRESA", "NUMERONF", "NROEMP_ORIGEM", "DTAEMISSAO", "DTAENTRADA",
@@ -181,8 +181,8 @@ st.caption(
 )
 
 if visao_compartilhada:
-    st.caption("VISÃO COMPARTILHADA - SOMENTE LOJAS (SEM CDs)")
-    painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
+    st.caption("VISÃO COMPARTILHADA / NOTAS SEM CHECK-IN · SOMENTE LOJAS (SEM CDs)")
+    painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv", ordenar_por_registros=True)
     st.caption("'Sem check-in' significa ausência de correspondência nas bases disponíveis, não prova de que o recebimento nunca ocorreu.")
     if st.button("Voltar ao dashboard completo", key="voltar_dashboard_completo"):
         st.query_params.pop("visao", None)
@@ -194,7 +194,7 @@ else:
         if not multiplos.empty:
             st.warning("Algumas notas possuem mais de um check-in para a mesma unidade e NF. O valor dessas notas não foi atribuído automaticamente.")
     with tab_sem:
-        if st.button("Abrir visualização para apresentação", key="compartilhar_sem_checkin"):
+        if st.button("Abrir visão compartilhável de Sem check-in", key="compartilhar_sem_checkin"):
             st.query_params["visao"] = "sem-checkin"
             st.rerun()
         painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")

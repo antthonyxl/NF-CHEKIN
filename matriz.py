@@ -38,7 +38,7 @@ def contar_multiplos(grupo: pd.DataFrame) -> int:
     return grupo.loc[grupo["SITUACAO"].eq("Múltiplos check-ins"), "NF_NORMALIZADA"].nunique()
 
 
-def montar_matriz(df: pd.DataFrame, *, com_checkin: bool, paleta: dict[str, str]) -> str:
+def montar_matriz(df: pd.DataFrame, *, com_checkin: bool, paleta: dict[str, str], ordenar_por_registros: bool = False) -> str:
     """HTML para components.html; colunas clicáveis, detalhes expansíveis e paginação de 75."""
     if com_checkin:
         colunas = [
@@ -93,6 +93,11 @@ def montar_matriz(df: pd.DataFrame, *, com_checkin: bool, paleta: dict[str, str]
             "sortKeys": ordenacao,
             "rows": linhas,
         })
+
+    # Apenas na visão compartilhada: iniciar o ranking por maior quantidade de
+    # registros sem check-in. As demais matrizes continuam na ordem original.
+    if ordenar_por_registros:
+        grupos.sort(key=lambda g: (-g["sortKeys"][1], str(g["sortKeys"][0])))
 
     # Escapa o JSON para impedir que texto da planilha encerre o <script> de dados.
     payload = json.dumps({
@@ -170,7 +175,7 @@ const collator=new Intl.Collator('pt-BR',{numeric:true,sensitivity:'base'});
 const root=document.getElementById('groups');
 const head=document.getElementById('heading');
 const scroller=document.getElementById('scroller');
-const groupSort={col:0,direction:1,active:false};
+const groupSort=__INITIAL_SORT__;
 const detailState=new Map();
 const detailsNodes=[];
 const PAGE=75;
@@ -265,6 +270,10 @@ function renderPage(index,page){
  }));
 }
 </script></body></html>'''
+    ordenacao_inicial = (
+        {"col": 1, "direction": -1, "active": True}
+        if ordenar_por_registros else {"col": 0, "direction": 1, "active": False}
+    )
     return html.replace("__THEME__", css_vars).replace("__DATA__", payload).replace(
         "__HEADINGS__", json.dumps(headings, ensure_ascii=False)
-    )
+    ).replace("__INITIAL_SORT__", json.dumps(ordenacao_inicial))

@@ -1,0 +1,70 @@
+--- app.py (anterior)
++++ app.py (novo)
+@@ -48,12 +48,12 @@
+     return recorte.to_csv(index=False, sep=";", decimal=",", encoding="utf-8-sig").encode("utf-8-sig")
+ 
+ 
+-def painel(nome: str, dados: pd.DataFrame, *, com_checkin: bool, tema: dict[str, str], arquivo_csv: str):
++def painel(nome: str, dados: pd.DataFrame, *, com_checkin: bool, tema: dict[str, str], arquivo_csv: str, ordenar_por_registros: bool = False):
+     visual.secao(nome, "Clique nos títulos para ordenar as lojas e na seta para abrir as notas. Nos detalhes, os títulos também ordenam as NFs.")
+     if dados.empty:
+         visual.vazio("Nenhuma nota encontrada", "Nenhum registro corresponde aos filtros selecionados.")
+         return
+-    components.html(montar_matriz(dados, com_checkin=com_checkin, paleta=tema), height=590, scrolling=False)
++    components.html(montar_matriz(dados, com_checkin=com_checkin, paleta=tema, ordenar_por_registros=ordenar_por_registros), height=590, scrolling=False)
+     if com_checkin:
+         cols = [
+             "EMPRESA", "NUMERONF", "NROEMP_ORIGEM", "DTAEMISSAO", "DTAENTRADA",
+@@ -182,7 +182,7 @@
+ 
+ if visao_compartilhada:
+     st.caption("VISÃO COMPARTILHADA / NOTAS SEM CHECK-IN · SOMENTE LOJAS (SEM CDs)")
+-    painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
++    painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv", ordenar_por_registros=True)
+     st.caption("'Sem check-in' significa ausência de correspondência nas bases disponíveis, não prova de que o recebimento nunca ocorreu.")
+     if st.button("Voltar ao dashboard completo", key="voltar_dashboard_completo"):
+         st.query_params.pop("visao", None)
+--- matriz.py (anterior)
++++ matriz.py (novo)
+@@ -38,7 +38,7 @@
+     return grupo.loc[grupo["SITUACAO"].eq("Múltiplos check-ins"), "NF_NORMALIZADA"].nunique()
+ 
+ 
+-def montar_matriz(df: pd.DataFrame, *, com_checkin: bool, paleta: dict[str, str]) -> str:
++def montar_matriz(df: pd.DataFrame, *, com_checkin: bool, paleta: dict[str, str], ordenar_por_registros: bool = False) -> str:
+     """HTML para components.html; colunas clicáveis, detalhes expansíveis e paginação de 75."""
+     if com_checkin:
+         colunas = [
+@@ -93,6 +93,11 @@
+             "sortKeys": ordenacao,
+             "rows": linhas,
+         })
++
++    # Apenas na visão compartilhada: iniciar o ranking por maior quantidade de
++    # registros sem check-in. As demais matrizes continuam na ordem original.
++    if ordenar_por_registros:
++        grupos.sort(key=lambda g: (-g["sortKeys"][1], str(g["sortKeys"][0])))
+ 
+     # Escapa o JSON para impedir que texto da planilha encerre o <script> de dados.
+     payload = json.dumps({
+@@ -170,7 +175,7 @@
+ const root=document.getElementById('groups');
+ const head=document.getElementById('heading');
+ const scroller=document.getElementById('scroller');
+-const groupSort={col:0,direction:1,active:false};
++const groupSort=__INITIAL_SORT__;
+ const detailState=new Map();
+ const detailsNodes=[];
+ const PAGE=75;
+@@ -265,6 +270,10 @@
+  }));
+ }
+ </script></body></html>'''
++    ordenacao_inicial = (
++        {"col": 1, "direction": -1, "active": True}
++        if ordenar_por_registros else {"col": 0, "direction": 1, "active": False}
++    )
+     return html.replace("__THEME__", css_vars).replace("__DATA__", payload).replace(
+         "__HEADINGS__", json.dumps(headings, ensure_ascii=False)
+-    )
++    ).replace("__INITIAL_SORT__", json.dumps(ordenacao_inicial))
