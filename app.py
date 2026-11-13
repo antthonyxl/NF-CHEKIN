@@ -28,6 +28,18 @@ st.set_page_config(
 )
 
 
+
+def filtrar_lojas_do_link(dados: pd.DataFrame) -> pd.DataFrame:
+    """No link compartilhável, manter somente as lojas 001–068 da base atual.
+
+    COD_LOJA vem de EMPRESA, e não do nome exibido pelo CHECKIN.
+    Assim são excluídos os CDs (988, 989, 993, 995, 996, 998, 999),
+    a unidade CSC (552) e a darkstore (700), sem excluir lojas ainda
+    não classificadas no cadastro Regional/Distrital (ex.: 025-TAMBAU).
+    """
+    codigo = pd.to_numeric(dados["COD_LOJA"], errors="coerce")
+    return dados.loc[codigo.between(1, 68).fillna(False)].copy()
+
 def gerar_csv(df: pd.DataFrame, colunas: list[str]) -> bytes:
     recorte = df.loc[:, colunas].copy()
     for coluna in ("DTAENTRADA", "DTAEMISSAO", "ENTRADA_CHECKIN"):
@@ -130,7 +142,9 @@ if not visao_compartilhada:
             filtrados["NF_NORMALIZADA"].astype(str).str.contains(termo, regex=True, na=False)
         ]
 else:
-    filtrados = dados  # Link compartilhado mostra os totais gerais, sem filtros ativos.
+    # Restringe apenas a VISÃO COMPARTILHADA a lojas; KPIs e matriz usam o mesmo recorte.
+    # No dashboard completo, os CDs e as demais unidades permanecem acessíveis.
+    filtrados = filtrar_lojas_do_link(dados)
 
 localizados = filtrados[filtrados["SITUACAO"].isin(["Localizado", "Múltiplos check-ins"])]
 sem_checkin = filtrados[filtrados["SITUACAO"].isin(["Sem check-in", "Chave inválida"])]
@@ -156,7 +170,7 @@ st.caption(
 )
 
 if visao_compartilhada:
-    st.caption("VISÃO COMPARTILHADA / NOTAS SEM CHECK-IN")
+    st.caption("VISÃO COMPARTILHADA / NOTAS SEM CHECK-IN · SOMENTE LOJAS (SEM CDs)")
     painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
     st.caption("'Sem check-in' significa ausência de correspondência nas bases disponíveis, não prova de que o recebimento nunca ocorreu.")
     if st.button("Voltar ao dashboard completo", key="voltar_dashboard_completo"):
@@ -169,7 +183,7 @@ else:
         if not multiplos.empty:
             st.warning("Algumas notas possuem mais de um check-in para a mesma unidade e NF. O valor dessas notas não foi atribuído automaticamente.")
     with tab_sem:
-        if st.button("Abrir visão compartilhável de Sem check-in", key="compartilhar_sem_checkin"):
+        if st.button("Abrir visão para apresentação", key="compartilhar_sem_checkin"):
             st.query_params["visao"] = "sem-checkin"
             st.rerun()
         painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
