@@ -1,0 +1,16 @@
+VISÃO COMPARTILHÁVEL — NF x CHECK-IN
+
+1. Substitua o app.py no seu projeto pelo arquivo atualizado deste pacote.
+2. Mantenha os demais arquivos e a pasta imagem/image.png (ícone).
+3. Execute localmente: python -m streamlit run app.py
+4. Teste a rota: http://localhost:8501/?visao=sem-checkin
+5. Publique pelo GitHub: git add app.py && git commit -m "Adiciona link compartilhavel da visao Sem check-in" && git push origin main
+6. Compartilhe https://SEU-APP.streamlit.app/?visao=sem-checkin
+
+O painel principal mantém o botão "Abrir visão compartilhável de Sem check-in" dentro da aba Sem check-in.
+Esse botão abre a versão para copiar o link da barra do navegador.
+O link NÃO cria regras de acesso: o aplicativo privado exige autorização no Streamlit Community Cloud.
+O recorte não isola dados por perfil de usuário e não congela valores; os dados continuam vindo do BigQuery.
+
+OBS.: Este app.py foi preparado sobre a última versão fornecida nesta conversa. Caso você tenha alterado
+outras partes depois, aplique manualmente o patch (alteracoes_app.patch) preservando suas mudanças.

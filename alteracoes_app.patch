@@ -1,0 +1,233 @@
+--- app.py (anterior)
++++ app.py (compartilhável)
+@@ -18,9 +18,13 @@
+ from classificacao import classificar_unidades, filtrar_hierarquia, ler_classificacao
+ from matriz import moeda, montar_matriz, numero_br
+ 
++# Visão compartilhável: use ?visao=sem-checkin ao final do endereço do app.
++# O link muda somente a apresentação; o controle de acesso continua sendo do Streamlit Cloud.
++visao_compartilhada = st.query_params.get("visao") == "sem-checkin"
++icone_local = Path(__file__).parent / "imagem" / "image.png"
+ st.set_page_config(
+-    page_title="Conciliação NF | Check-in", page_icon="📊", layout="wide",
+-    initial_sidebar_state="expanded",
++    page_title="NF | Check-in", page_icon=str(icone_local) if icone_local.is_file() else "📊",
++    layout="wide", initial_sidebar_state="collapsed" if visao_compartilhada else "expanded",
+ )
+ 
+ 
+@@ -55,23 +59,27 @@
+     )
+ 
+ 
+-with st.sidebar:
+-    st.markdown('<div class="aq-brand">NF <span style="color:#F5A24A">/</span> CHECK-IN'
+-                '<small>CONCILIAÇÃO OPERACIONAL</small></div>', unsafe_allow_html=True)
+-    st.divider()
+-    escuro = st.toggle("Modo escuro", value=False)
+-    st.markdown('<div class="aq-sidebar-label">DADOS DO BIGQUERY</div>', unsafe_allow_html=True)
+-    st.caption("Fonte: BigQuery · Dataset controle_recebimento. Atualização automática a cada 10 minutos.")
+-    if st.button("Atualizar dados agora", use_container_width=True):
+-        limpar_cache()
++if not visao_compartilhada:
++    with st.sidebar:
++        st.markdown('<div class="aq-brand">NF <span style="color:#F5A24A">/</span> CHECK-IN'
++                    '<small>CONCILIAÇÃO OPERACIONAL</small></div>', unsafe_allow_html=True)
++        st.divider()
++        escuro = st.toggle("Modo escuro", value=False)
++        st.markdown('<div class="aq-sidebar-label">DADOS DO BIGQUERY</div>', unsafe_allow_html=True)
++        st.caption("Fonte: BigQuery · Dataset controle_recebimento. Atualização automática a cada 10 minutos.")
++        if st.button("Atualizar dados agora", use_container_width=True):
++            limpar_cache()
++else:
++    escuro = False  # Layout claro no link compartilhado, sem controles laterais.
+ 
+ visual.aplicar_tema(escuro)
+ tema = visual.paleta(escuro)
+-visual.cabecalho(
+-    "Conciliação de notas fiscais",
+-    "Notas da ENTRADA AUTO NF localizadas na base CHECKIN, com análise de pendências por unidade.",
+-    etiqueta="CONTROLE OPERACIONAL / ENTRADA DE NF",
+-)
++if not visao_compartilhada:
++    visual.cabecalho(
++        "Conciliação de notas fiscais",
++        "Notas da ENTRADA AUTO NF localizadas na base CHECKIN, com análise de pendências por unidade.",
++        etiqueta="CONTROLE OPERACIONAL / ENTRADA DE NF",
++    )
+ 
+ try:
+     with st.spinner("Consultando e conciliando as bases..."):
+@@ -87,39 +95,42 @@
+     st.info("Confira as permissões de leitura, o projeto/dataset, a região e o esquema das tabelas no BigQuery.")
+     st.stop()
+ 
+-with st.container(border=True):
+-    filtros_regional, filtros_distrital = st.columns(2)
+-    with filtros_regional:
+-        opcoes_regionais = sorted(dados["REGIONAL"].dropna().unique().tolist())
+-        regionais = st.multiselect("Filtrar por Regional", opcoes_regionais, placeholder="Todas as regionais")
+-    # Lista distrital acompanha a(s) regional(is) escolhida(s).
+-    base_distritais = dados.loc[dados["REGIONAL"].isin(regionais)] if regionais else dados
+-    opcoes_distritais = sorted(base_distritais["DISTRITAL"].dropna().unique().tolist())
+-    chave_distrital = "filtro_distritais"
+-    if chave_distrital in st.session_state:
+-        st.session_state[chave_distrital] = [
+-            nome for nome in st.session_state[chave_distrital] if nome in opcoes_distritais
++if not visao_compartilhada:
++    with st.container(border=True):
++        filtros_regional, filtros_distrital = st.columns(2)
++        with filtros_regional:
++            opcoes_regionais = sorted(dados["REGIONAL"].dropna().unique().tolist())
++            regionais = st.multiselect("Filtrar por Regional", opcoes_regionais, placeholder="Todas as regionais")
++        # Lista distrital acompanha a(s) regional(is) escolhida(s).
++        base_distritais = dados.loc[dados["REGIONAL"].isin(regionais)] if regionais else dados
++        opcoes_distritais = sorted(base_distritais["DISTRITAL"].dropna().unique().tolist())
++        chave_distrital = "filtro_distritais"
++        if chave_distrital in st.session_state:
++            st.session_state[chave_distrital] = [
++                nome for nome in st.session_state[chave_distrital] if nome in opcoes_distritais
++            ]
++        with filtros_distrital:
++            distritais = st.multiselect(
++                "Filtrar por Distrital", opcoes_distritais,
++                placeholder="Todos os distritais", key=chave_distrital,
++            )
++        filtros_col1, filtros_col2 = st.columns([3, 2])
++        with filtros_col1:
++            todas_lojas = sorted(dados["EMPRESA"].dropna().astype(str).unique().tolist())
++            unidades = st.multiselect("Filtrar por loja / CD", todas_lojas, placeholder="Todas as unidades")
++        with filtros_col2:
++            consulta = st.text_input("Pesquisar número da NF", placeholder="Digite o número da nota")
++
++    filtrados = filtrar_hierarquia(dados, regionais, distritais)
++    if unidades:
++        filtrados = filtrados.loc[filtrados["EMPRESA"].isin(unidades)]
++    if consulta.strip():
++        termo = re.escape(consulta.strip())
++        filtrados = filtrados.loc[
++            filtrados["NF_NORMALIZADA"].astype(str).str.contains(termo, regex=True, na=False)
+         ]
+-    with filtros_distrital:
+-        distritais = st.multiselect(
+-            "Filtrar por Distrital", opcoes_distritais,
+-            placeholder="Todos os distritais", key=chave_distrital,
+-        )
+-    filtros_col1, filtros_col2 = st.columns([3, 2])
+-    with filtros_col1:
+-        todas_lojas = sorted(dados["EMPRESA"].dropna().astype(str).unique().tolist())
+-        unidades = st.multiselect("Filtrar por loja / CD", todas_lojas, placeholder="Todas as unidades")
+-    with filtros_col2:
+-        consulta = st.text_input("Pesquisar número da NF", placeholder="Digite o número da nota")
+-
+-filtrados = filtrar_hierarquia(dados, regionais, distritais)
+-if unidades:
+-    filtrados = filtrados.loc[filtrados["EMPRESA"].isin(unidades)]
+-if consulta.strip():
+-    termo = re.escape(consulta.strip())
+-    filtrados = filtrados.loc[
+-        filtrados["NF_NORMALIZADA"].astype(str).str.contains(termo, regex=True, na=False)
+-    ]
++else:
++    filtrados = dados  # Link compartilhado mostra os totais gerais, sem filtros ativos.
+ 
+ localizados = filtrados[filtrados["SITUACAO"].isin(["Localizado", "Múltiplos check-ins"])]
+ sem_checkin = filtrados[filtrados["SITUACAO"].isin(["Sem check-in", "Chave inválida"])]
+@@ -144,45 +155,56 @@
+     "a conciliação usa código da unidade + NF normalizada."
+ )
+ 
+-tab_com, tab_sem, tab_rev = st.tabs(["Com check-in", "Sem check-in", "Revisar múltiplos check-ins"])
+-with tab_com:
+-    painel("Notas com check-in", localizados, com_checkin=True, tema=tema, arquivo_csv="notas_com_checkin.csv")
+-    if not multiplos.empty:
+-        st.warning("Algumas notas possuem mais de um check-in para a mesma unidade e NF. O valor dessas notas não foi atribuído automaticamente.")
+-with tab_sem:
++if visao_compartilhada:
++    st.caption("VISÃO COMPARTILHADA / NOTAS SEM CHECK-IN")
+     painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
+-    st.caption("'Sem check-in' significa ausência de correspondência nos arquivos carregados, não prova de que o recebimento nunca ocorreu.")
+-with tab_rev:
+-    visual.secao("Notas com múltiplos registros", "Os candidatos reais do CHECKIN são apresentados sem escolher automaticamente um valor.")
+-    if multiplos.empty:
+-        visual.vazio("Nenhuma ambiguidade no filtro", "Não há notas com múltiplos check-ins para os filtros selecionados.")
+-    else:
+-        chaves = multiplos[["COD_LOJA", "NF_NORMALIZADA"]].drop_duplicates()
+-        revisao = chaves.merge(candidatos, on=["COD_LOJA", "NF_NORMALIZADA"], how="left")
+-        vis = revisao[[
+-            "Loja", "Nota", "Fornecedor", "Entrada", "Valor", "Check-In",
+-            "Status Check-In", "Status NF", "LINHA_CHECKIN",
+-        ]].copy()
+-        vis["Entrada"] = pd.to_datetime(vis["Entrada"], errors="coerce").dt.strftime("%d/%m/%Y")
+-        st.dataframe(vis, width="stretch", hide_index=True, height=420)
+-        st.download_button("Exportar candidatos para conferência (CSV)",
+-                           data=gerar_csv(revisao, ["Loja", "Nota", "Fornecedor", "Entrada", "Valor", "Check-In", "Status Check-In", "Status NF", "LINHA_CHECKIN"]),
+-                           file_name="checkins_multiplos.csv", mime="text/csv")
+-
+-with st.expander("Como funciona a conciliação", expanded=False):
+-    st.markdown("""
+-    **Chave de busca:** código da unidade + número da nota. Por exemplo,
+-    `001-CARPINA` corresponde à unidade `NOVO - 01 - Carpina Centro`.
+-
+-    **Tratamento da série:** `75137-1` → `75137` e `1776754-001` → `1776754`.
+-    O sufixo numérico é retirado somente da coluna **Nota** do CHECKIN.
+-
+-    **Valor e check-in:** quando existe uma única correspondência, apresenta Valor,
+-    número e status do check-in. Se houver dois ou mais registros do CHECKIN para a
+-    mesma loja + nota, a nota permanece localizada, mas seu valor fica pendente
+-    de análise na guia **Revisar múltiplos check-ins**.
+-
+-    **Preservação das linhas:** a saída mantém todas as linhas da ENTRADA AUTO NF,
+-    incluindo registros repetidos. O indicador financeiro não soma a mesma
+-    combinação de loja + NF mais de uma vez.
+-    """)
++    st.caption("'Sem check-in' significa ausência de correspondência nas bases disponíveis, não prova de que o recebimento nunca ocorreu.")
++    if st.button("Voltar ao dashboard completo", key="voltar_dashboard_completo"):
++        st.query_params.pop("visao", None)
++        st.rerun()
++else:
++    tab_com, tab_sem, tab_rev = st.tabs(["Com check-in", "Sem check-in", "Revisar múltiplos check-ins"])
++    with tab_com:
++        painel("Notas com check-in", localizados, com_checkin=True, tema=tema, arquivo_csv="notas_com_checkin.csv")
++        if not multiplos.empty:
++            st.warning("Algumas notas possuem mais de um check-in para a mesma unidade e NF. O valor dessas notas não foi atribuído automaticamente.")
++    with tab_sem:
++        if st.button("Abrir visão compartilhável de Sem check-in", key="compartilhar_sem_checkin"):
++            st.query_params["visao"] = "sem-checkin"
++            st.rerun()
++        painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
++        st.caption("'Sem check-in' significa ausência de correspondência nos arquivos carregados, não prova de que o recebimento nunca ocorreu.")
++    with tab_rev:
++        visual.secao("Notas com múltiplos registros", "Os candidatos reais do CHECKIN são apresentados sem escolher automaticamente um valor.")
++        if multiplos.empty:
++            visual.vazio("Nenhuma ambiguidade no filtro", "Não há notas com múltiplos check-ins para os filtros selecionados.")
++        else:
++            chaves = multiplos[["COD_LOJA", "NF_NORMALIZADA"]].drop_duplicates()
++            revisao = chaves.merge(candidatos, on=["COD_LOJA", "NF_NORMALIZADA"], how="left")
++            vis = revisao[[
++                "Loja", "Nota", "Fornecedor", "Entrada", "Valor", "Check-In",
++                "Status Check-In", "Status NF", "LINHA_CHECKIN",
++            ]].copy()
++            vis["Entrada"] = pd.to_datetime(vis["Entrada"], errors="coerce").dt.strftime("%d/%m/%Y")
++            st.dataframe(vis, width="stretch", hide_index=True, height=420)
++            st.download_button("Exportar candidatos para conferência (CSV)",
++                               data=gerar_csv(revisao, ["Loja", "Nota", "Fornecedor", "Entrada", "Valor", "Check-In", "Status Check-In", "Status NF", "LINHA_CHECKIN"]),
++                               file_name="checkins_multiplos.csv", mime="text/csv")
++
++    with st.expander("Como funciona a conciliação", expanded=False):
++        st.markdown("""
++        **Chave de busca:** código da unidade + número da nota. Por exemplo,
++        `001-CARPINA` corresponde à unidade `NOVO - 01 - Carpina Centro`.
++
++        **Tratamento da série:** `75137-1` → `75137` e `1776754-001` → `1776754`.
++        O sufixo numérico é retirado somente da coluna **Nota** do CHECKIN.
++
++        **Valor e check-in:** quando existe uma única correspondência, apresenta Valor,
++        número e status do check-in. Se houver dois ou mais registros do CHECKIN para a
++        mesma loja + nota, a nota permanece localizada, mas seu valor fica pendente
++        de análise na guia **Revisar múltiplos check-ins**.
++
++        **Preservação das linhas:** a saída mantém todas as linhas da ENTRADA AUTO NF,
++        incluindo registros repetidos. O indicador financeiro não soma a mesma
++        combinação de loja + NF mais de uma vez.
++        """)
