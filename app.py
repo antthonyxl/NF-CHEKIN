@@ -85,6 +85,17 @@ else:
     escuro = False  # Layout claro no link compartilhado, sem controles laterais.
 
 visual.aplicar_tema(escuro)
+# Somente no link compartilhavel: respiro entre o topo da pagina e os KPIs.
+# Nao modifica o espacamento do dashboard completo.
+if visao_compartilhada:
+    st.markdown("""
+        <style>
+        .block-container { padding-top: 6.5rem !important; }
+        @media (max-width: 900px) {
+            .block-container { padding-top: 5.5rem !important; }
+        }
+        </style>
+    """, unsafe_allow_html=True)
 tema = visual.paleta(escuro)
 if not visao_compartilhada:
     visual.cabecalho(
@@ -183,7 +194,7 @@ else:
         if not multiplos.empty:
             st.warning("Algumas notas possuem mais de um check-in para a mesma unidade e NF. O valor dessas notas não foi atribuído automaticamente.")
     with tab_sem:
-        if st.button("Abrir visão para apresentação", key="compartilhar_sem_checkin"):
+        if st.button("Abrir visão compartilhável de Sem check-in", key="compartilhar_sem_checkin"):
             st.query_params["visao"] = "sem-checkin"
             st.rerun()
         painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")

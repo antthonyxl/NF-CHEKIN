@@ -1,0 +1,20 @@
+--- app.py (anterior)
++++ app.py (novo)
+@@ -85,6 +85,17 @@
+     escuro = False  # Layout claro no link compartilhado, sem controles laterais.
+ 
+ visual.aplicar_tema(escuro)
++# Somente no link compartilhavel: respiro entre o topo da pagina e os KPIs.
++# Nao modifica o espacamento do dashboard completo.
++if visao_compartilhada:
++    st.markdown("""
++        <style>
++        .block-container { padding-top: 6.5rem !important; }
++        @media (max-width: 900px) {
++            .block-container { padding-top: 5.5rem !important; }
++        }
++        </style>
++    """, unsafe_allow_html=True)
+ tema = visual.paleta(escuro)
+ if not visao_compartilhada:
+     visual.cabecalho(
