@@ -181,7 +181,7 @@ st.caption(
 )
 
 if visao_compartilhada:
-    st.caption("VISÃO COMPARTILHADA / NOTAS SEM CHECK-IN · SOMENTE LOJAS (SEM CDs)")
+    st.caption("VISÃO COMPARTILHADA - SOMENTE LOJAS (SEM CDs)")
     painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
     st.caption("'Sem check-in' significa ausência de correspondência nas bases disponíveis, não prova de que o recebimento nunca ocorreu.")
     if st.button("Voltar ao dashboard completo", key="voltar_dashboard_completo"):
@@ -194,7 +194,7 @@ else:
         if not multiplos.empty:
             st.warning("Algumas notas possuem mais de um check-in para a mesma unidade e NF. O valor dessas notas não foi atribuído automaticamente.")
     with tab_sem:
-        if st.button("Abrir visão compartilhável de Sem check-in", key="compartilhar_sem_checkin"):
+        if st.button("Abrir visualização para apresentação", key="compartilhar_sem_checkin"):
             st.query_params["visao"] = "sem-checkin"
             st.rerun()
         painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
