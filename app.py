@@ -150,7 +150,7 @@ with tab_com:
 with tab_sem:
     painel("Notas sem check-in", sem_checkin, com_checkin=False, tema=tema, arquivo_csv="notas_sem_checkin.csv")
 with tab_rev:
-    visual.secao("Notas com múltiplos registros", "Os candidatos reais do CHECKIN são apresentados sem escolher automaticamente um valor.")
+    visual.secao("Notas com múltiplos registros")
     if multiplos.empty:
         visual.vazio("Nenhuma ambiguidade no filtro", "Não há notas com múltiplos check-ins para os filtros selecionados.")
     else:
